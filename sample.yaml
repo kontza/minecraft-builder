@@ -1,0 +1,11 @@
+server_user: paper
+server_group: paper
+server_instances:
+  - name: silvia
+    server_jar: paper-1.18.2-271.jar
+    server_port: 25565
+    world_name: brave-new-world
+  - name: pojat
+    server_jar: paper-1.18.2-271.jar
+    server_port: 35565
+    world_name: viela_parempi_maailma
