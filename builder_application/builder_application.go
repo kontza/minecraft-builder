@@ -177,12 +177,21 @@ func (ba *BuilderApplication) populateForm(server ServerInstance) {
 		}
 	}
 	if selection < 0 {
-		ba.loadJars()
-		ba.jars = append(ba.jars, fmt.Sprintf("!%s", server.ServerJar))
-		selection = len(ba.jars) - 1
+		exist := false
+		for i, jar := range ba.jars {
+			if jar[1:] == server.ServerJar {
+				exist = true
+				selection = i
+			}
+		}
+		if !exist {
+			ba.jars = append(ba.jars, fmt.Sprintf("!%s", server.ServerJar))
+			selection = len(ba.jars) - 1
+		}
 	}
-	ba.form.GetFormItem(ServerJar).(*tview.DropDown).SetOptions(ba.jars, nil)
-	ba.form.GetFormItem(ServerJar).(*tview.DropDown).SetCurrentOption(selection)
+	ba.form.GetFormItem(ServerJar).(*tview.DropDown).
+		SetOptions(ba.jars, nil).
+		SetCurrentOption(selection)
 	ba.form.GetFormItem(ServerPort).(*tview.InputField).SetText(strconv.FormatInt(int64(server.ServerPort), 10))
 }
 
