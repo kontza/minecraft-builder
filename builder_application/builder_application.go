@@ -19,7 +19,7 @@ import (
 type ServerInstance struct {
 	Name       string
 	ServerJar  string `yaml:"server_jar"`
-	ServerPort int64  `yaml:"server_port"`
+	ServerPort int    `yaml:"server_port"`
 	WorldName  string `yaml:"world_name"`
 }
 
@@ -28,6 +28,8 @@ type Settings struct {
 	ServerGroup     string           `yaml:"server_group"`
 	ServerInstances []ServerInstance `yaml:"server_instances"`
 }
+
+type void struct{}
 
 const (
 	// Form items
@@ -45,12 +47,13 @@ type BuilderApplication struct {
 	*tview.Application
 	mainPage          string
 	modalPage         string
-	title             string
+	appTitle          string
 	servicesHelp      string
 	settingsHelp      string
 	servicesName      string
 	settingsName      string
 	infoName          string
+	logName           string
 	quitButton        string
 	saveAndQuitButton string
 	cancelButton      string
@@ -64,6 +67,8 @@ type BuilderApplication struct {
 	form              *tview.Form
 	textView          *tview.TextView
 	flex              *tview.Flex
+	topFlex           *tview.Flex
+	log               *tview.TextView
 }
 
 func NewApplicationBuilder() ApplicationBuilder {
@@ -71,15 +76,16 @@ func NewApplicationBuilder() ApplicationBuilder {
 		Application:  tview.NewApplication(),
 		mainPage:     "main",
 		modalPage:    "modal",
-		title:        "Minecraft Ansible Config Builder",
+		appTitle:     "Minecraft Ansible Config Builder",
 		servicesHelp: "This list contains the detected Minecraft servers from the input YAML. You can quit this application by pressing ESC while this panel is active",
-		settingsHelp: `Name: the name of the systemd service
-World Name: the name of the Minecraft world
-Server JAR: the JAR file to use for the service
-Server Port: the port to use for the service`,
+		settingsHelp: `[::b]Name       [::-] the name of the systemd service
+[::b]World Name [::-] the name of the Minecraft world
+[::b]Server JAR [::-] the JAR file to use for the service
+[::b]Server Port[::-] the port to use for the service`,
 		servicesName:      "services",
 		settingsName:      "settings",
 		infoName:          "info",
+		logName:           "log",
 		quitButton:        "Quit",
 		saveAndQuitButton: "Save & Quit",
 		cancelButton:      "Cancel",
@@ -87,6 +93,10 @@ Server Port: the port to use for the service`,
 		configFilePath:    os.Args[1],
 	}
 	return ba
+}
+
+func (ba *BuilderApplication) makeTitleString(input string) string {
+	return fmt.Sprintf(" %s ", strings.Title(input))
 }
 
 func (ba *BuilderApplication) loadSettings() *BuilderApplication {
@@ -173,7 +183,24 @@ func (ba *BuilderApplication) populateForm(server ServerInstance) {
 	}
 	ba.form.GetFormItem(ServerJar).(*tview.DropDown).SetOptions(ba.jars, nil)
 	ba.form.GetFormItem(ServerJar).(*tview.DropDown).SetCurrentOption(selection)
-	ba.form.GetFormItem(ServerPort).(*tview.InputField).SetText(strconv.FormatInt(server.ServerPort, 10))
+	ba.form.GetFormItem(ServerPort).(*tview.InputField).SetText(strconv.FormatInt(int64(server.ServerPort), 10))
+}
+
+func (ba *BuilderApplication) checkPorts(port int) {
+	var member void
+	ports := make(map[int]void)
+	ports[port] = member
+	count := 1
+	currentServer := ba.settings.ServerInstances[ba.selectedServer]
+	for i, server := range ba.settings.ServerInstances {
+		if i == int(ba.selectedServer) {
+			continue
+		}
+		if server.ServerPort == port {
+			log.Printf("[red]'%s' port %d clashes with '%s'![-]", currentServer.Name, port, server.Name)
+			count++
+		}
+	}
 }
 
 func (ba *BuilderApplication) saveForm() {
@@ -186,7 +213,8 @@ func (ba *BuilderApplication) saveForm() {
 	}
 	server.ServerJar = jar
 	port, _ := strconv.Atoi(ba.form.GetFormItem(ServerPort).(*tview.InputField).GetText())
-	server.ServerPort = int64(port)
+	ba.checkPorts(port)
+	server.ServerPort = port
 	ba.settings.ServerInstances[ba.selectedServer] = server
 }
 
@@ -221,7 +249,7 @@ func (ba *BuilderApplication) initForm() *BuilderApplication {
 		AddInputField("World Name", "", 0, nil, nil).
 		AddDropDown("Server JAR", ba.jars, 0, nil).
 		AddInputField("Server Port", "", 0, nil, nil)
-	ba.form.Box.SetBorder(true).SetTitle(fmt.Sprintf(" %s ", strings.Title(ba.settingsName)))
+	ba.form.Box.SetBorder(true).SetTitle(ba.makeTitleString(ba.settingsName))
 	ba.form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
 			ba.SetFocus(ba.services)
@@ -245,20 +273,19 @@ func (ba *BuilderApplication) initServices() *BuilderApplication {
 	for i, instance := range ba.settings.ServerInstances {
 		key := int64(i)
 		ba.services.AddItem(instance.Name, "", rune(key+'1'), func() {
-			helpText := ba.settingsHelp
 			_, jar := ba.form.GetFormItem(ServerJar).(*tview.DropDown).GetCurrentOption()
 			if jar[0] == '!' {
-				helpText = fmt.Sprintf("%s\n\n[red]'%s' not found in current directory!", helpText, jar[1:])
+				log.Printf("[red]'%s' not found in current directory![-]\n", jar[1:])
 			}
-			ba.textView.SetText(helpText)
 			ba.selectedServer = key
 			ba.populateForm(ba.settings.ServerInstances[ba.selectedServer])
 			ba.SetFocus(ba.form)
+			ba.textView.SetText(ba.settingsHelp)
 		})
 	}
 	ba.services.Box.
 		SetBorder(true).
-		SetTitle(fmt.Sprintf(" %s ", strings.Title(ba.servicesName))).
+		SetTitle(ba.makeTitleString(ba.servicesName)).
 		SetFocusFunc(func() {
 			ba.textView.SetText(ba.servicesHelp)
 		})
@@ -269,33 +296,48 @@ func (ba *BuilderApplication) initTextView() *BuilderApplication {
 	ba.textView.
 		SetWordWrap(true).
 		SetDynamicColors(true)
-	ba.textView.Box.SetBorder(true).SetTitle(fmt.Sprintf(" %s ", strings.Title(ba.infoName)))
+	ba.textView.Box.
+		SetBorder(true).
+		SetTitle(ba.makeTitleString(ba.infoName))
+	ba.log.
+		SetWordWrap(true).
+		SetDynamicColors(true)
+	ba.log.Box.
+		SetBorder(true).
+		SetTitle(ba.makeTitleString(ba.logName))
 	return ba
 }
 
 func (ba *BuilderApplication) initFlex() *BuilderApplication {
+	ba.topFlex.
+		SetDirection(tview.FlexRow).
+		AddItem(ba.flex, 0, 4, false).
+		AddItem(ba.log, 0, 1, false)
+	ba.topFlex.Box.
+		SetBorder(true).
+		SetTitle(ba.appTitle)
 	ba.flex.
 		AddItem(ba.services, 0, 1, false).
 		AddItem(ba.form, 0, 2, false).
 		AddItem(ba.textView, 0, 3, false)
-	ba.flex.Box.
-		SetBorder(true).
-		SetTitle(ba.title)
 	return ba
 }
 
 func (ba *BuilderApplication) initPages() *BuilderApplication {
-	ba.pages.AddPage(ba.mainPage, ba.flex, true, true)
+	ba.pages.AddPage(ba.mainPage, ba.topFlex, true, true)
 	return ba
 }
 
 func (ba *BuilderApplication) initialize() *BuilderApplication {
+	ba.textView = tview.NewTextView()
+	ba.log = tview.NewTextView()
+	log.SetOutput(ba.log)
 	ba.pages = tview.NewPages()
 	ba.modal = tview.NewModal()
 	ba.services = tview.NewList()
 	ba.form = tview.NewForm()
-	ba.textView = tview.NewTextView()
 	ba.flex = tview.NewFlex()
+	ba.topFlex = tview.NewFlex()
 	return ba.loadSettings().
 		loadJars().
 		initModal().
