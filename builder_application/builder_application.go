@@ -330,6 +330,7 @@ func (ba *BuilderApplication) initServices() *BuilderApplication {
 	ba.services.AddItem(ba.fetchLatest, "", 'f', func() {
 		ba.paperLoader.LoadLatest(ba.ShowProjectSelector)
 	})
+
 	ba.services.Box.
 		SetBorder(true).
 		SetTitle(ba.makeTitleString(ba.servicesName)).
@@ -396,7 +397,9 @@ func (ba *BuilderApplication) initialize() *BuilderApplication {
 
 func (ba *BuilderApplication) ShowProjectSelector(projects *[]string) {
 	ba.showModal("Select a PaperMC project:", *projects, func(s string) {
-		ba.paperLoader.LoadProject(s)
+		go ba.paperLoader.LoadProject(s, func(msg string) {
+			ba.QueueUpdateDraw(func() { log.Printf(msg) })
+		})
 	})
 }
 
