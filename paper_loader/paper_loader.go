@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"time"
 
+	"github.com/cavaliergopher/grab/v3"
+	"github.com/dustin/go-humanize"
 	"github.com/gocolly/colly"
 )
 
@@ -47,17 +50,35 @@ type paperLoader struct {
 }
 
 func (l paperLoader) download(project string, version string, build int, artifact string) {
+	client := grab.NewClient()
+	req, _ := grab.NewRequest(artifact, fmt.Sprintf("%s/%s/versions/%s/builds/%d/downloads/%s", l.url.String(), project, version, build, artifact))
+	req.NoResume = true
+
+	// start download
 	l.onProgress(fmt.Sprintln("Starting to download:", artifact))
-	c := l.collector.Clone()
-	c.OnError(l.logError)
-	c.OnResponse(func(r *colly.Response) {
-		r.Save(artifact)
-	})
-	c.OnScraped(func(r *colly.Response) {
-		l.onProgress(fmt.Sprintf("'%s' saved.\n", artifact))
-	})
-	// https://papermc.io/api/v2/projects/paper/versions/1.18.2/builds/277/downloads/paper-1.18.2-277.jar
-	c.Visit(fmt.Sprintf("%s/%s/versions/%s/builds/%d/downloads/%s", l.url.String(), project, version, build, artifact))
+	resp := client.Do(req)
+
+	// start UI loop
+	t := time.NewTicker(500 * time.Millisecond)
+	defer t.Stop()
+
+Loop:
+	for {
+		select {
+		case <-t.C:
+			l.onProgress(fmt.Sprintf("Downloaded %v / %v bytes\n",
+				humanize.Bytes(uint64(resp.BytesComplete())),
+				humanize.Bytes(uint64(resp.Size()))))
+		case <-resp.Done:
+			break Loop
+		}
+	}
+
+	// check for errors
+	if err := resp.Err(); err != nil {
+		l.onProgress(fmt.Sprintln("Download failed:", err))
+	}
+	l.onProgress(fmt.Sprintln("Artifact saved:", resp.Filename))
 }
 
 func (l paperLoader) loadBuild(project string, version string, buildNumber int) {

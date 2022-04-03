@@ -3,6 +3,7 @@ module github.com/kontza/minecraft_builder
 go 1.18
 
 require (
+	github.com/cavaliergopher/grab/v3 v3.0.1
 	github.com/dustin/go-humanize v1.0.0
 	github.com/gdamore/tcell/v2 v2.4.1-0.20210905002822-f057f0a857a1
 	github.com/gocolly/colly v1.2.0
