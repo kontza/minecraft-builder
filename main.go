@@ -7,7 +7,7 @@ import (
 )
 
 func usage() {
-	println(`minecraft-builder 1.0.0
+	println(`minecraft-builder 2.0
 
 USAGE:
     minecraft-builder [path]
