@@ -17,6 +17,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type ModalButtonCallback func(string)
+
 type ServerInstance struct {
 	Name       string
 	ServerJar  string `yaml:"server_jar"`
@@ -48,13 +50,13 @@ type ApplicationBuilder interface {
 type BuilderApplication struct {
 	*tview.Application
 	mainPage          string
-	quitPromptPage    string
 	selectorPage      string
 	appTitle          string
 	servicesHelp      string
 	settingsHelp      string
 	servicesName      string
 	settingsName      string
+	fetchLatest       string
 	infoName          string
 	logName           string
 	quitButton        string
@@ -65,7 +67,6 @@ type BuilderApplication struct {
 	configFilePath    string
 	jars              []string
 	pages             *tview.Pages
-	modal             *tview.Modal
 	services          *tview.List
 	form              *tview.Form
 	textView          *tview.TextView
@@ -77,18 +78,18 @@ type BuilderApplication struct {
 
 func NewApplicationBuilder() ApplicationBuilder {
 	ba := &BuilderApplication{
-		Application:    tview.NewApplication(),
-		mainPage:       "main",
-		quitPromptPage: "modal",
-		selectorPage:   "projectSelector",
-		appTitle:       "Minecraft Ansible Config Builder",
-		servicesHelp:   "This list contains the detected Minecraft servers from the input YAML. You can quit this application by pressing ESC while this panel is active",
+		Application:  tview.NewApplication(),
+		mainPage:     "main",
+		selectorPage: "projectSelector",
+		appTitle:     "Minecraft Ansible Config Builder",
+		servicesHelp: "This list contains the detected Minecraft servers from the input YAML. You can quit this application by pressing ESC while this panel is active",
 		settingsHelp: `[::b]Name       [::-] the name of the systemd service
 [::b]World Name [::-] the name of the Minecraft world
 [::b]Server JAR [::-] the JAR file to use for the service
 [::b]Server Port[::-] the port to use for the service`,
 		servicesName:      "services",
 		settingsName:      "settings",
+		fetchLatest:       "Fetch latest PaperMC",
 		infoName:          "info",
 		logName:           "log",
 		quitButton:        "Quit",
@@ -98,6 +99,50 @@ func NewApplicationBuilder() ApplicationBuilder {
 		configFilePath:    os.Args[1],
 	}
 	return ba
+}
+
+func (ba *BuilderApplication) showModal(message string, buttons []string, modalCallback ModalButtonCallback) {
+	const genericModal = "genericModal"
+	_, _, screenWidth, _ := ba.topFlex.GetRect()
+	messageView := tview.NewTextView()
+	messageView.SetText(message)
+	form := tview.NewForm()
+	for _, button := range buttons {
+		buttonLabel := button
+		form.AddButton(button, func() {
+			modalCallback(buttonLabel)
+			ba.hideModal(genericModal)
+		}).SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			switch event.Key() {
+			case tcell.KeyDown, tcell.KeyRight:
+				return tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
+			case tcell.KeyUp, tcell.KeyLeft:
+				return tcell.NewEventKey(tcell.KeyBacktab, 0, tcell.ModNone)
+			}
+			return event
+		})
+	}
+	formFlex := tview.NewFlex().SetDirection(tview.FlexRow)
+	formFlex.
+		AddItem(messageView, 0, 1, false).
+		AddItem(form, 0, 1, false)
+	formFlex.Box.SetBorder(true)
+	modal := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(formFlex, 0, 1, false).
+			AddItem(nil, 0, 1, false), screenWidth/2, 1, false).
+		AddItem(nil, 0, 1, false)
+	modal.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			ba.hideModal(genericModal)
+			return nil
+		}
+		return event
+	})
+	ba.SetFocus(form)
+	ba.pages.AddPage(genericModal, modal, true, true)
 }
 
 func (ba *BuilderApplication) makeTitleString(input string) string {
@@ -232,40 +277,12 @@ func (ba *BuilderApplication) saveForm() {
 	ba.settings.ServerInstances[ba.selectedServer] = server
 }
 
-func (ba *BuilderApplication) initModal() *BuilderApplication {
-	ba.modal.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
-			ba.hideModal(ba.quitPromptPage)
-			return nil
-		}
-		return event
-	})
-	ba.modal.
-		SetText("Do you want to quit the application?").
-		AddButtons([]string{ba.saveAndQuitButton, ba.quitButton, ba.cancelButton}).
-		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			switch buttonLabel {
-			case ba.saveAndQuitButton:
-				ba.saveSettings()
-				fallthrough
-			case ba.quitButton:
-				ba.Stop()
-			default:
-				ba.hideModal(ba.quitPromptPage)
-			}
-		})
-	return ba
-}
-
 func (ba *BuilderApplication) initForm() *BuilderApplication {
 	ba.form.
 		AddInputField("Name", "", 0, nil, nil).
 		AddInputField("World Name", "", 0, nil, nil).
 		AddDropDown("Server JAR", ba.jars, 0, nil).
-		AddInputField("Server Port", "", 0, nil, nil).
-		AddButton("Fetch latest PaperMC", func() {
-			ba.paperLoader.LoadLatest(ba.ShowProjectSelector)
-		})
+		AddInputField("Server Port", "", 0, nil, nil)
 	ba.form.Box.SetBorder(true).SetTitle(ba.makeTitleString(ba.settingsName))
 	ba.form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
@@ -282,7 +299,17 @@ func (ba *BuilderApplication) initForm() *BuilderApplication {
 func (ba *BuilderApplication) initServices() *BuilderApplication {
 	ba.services.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
-			ba.pages.AddAndSwitchToPage(ba.quitPromptPage, ba.modal, true)
+			ba.showModal("Do you want to quit the application?",
+				[]string{ba.saveAndQuitButton, ba.quitButton, ba.cancelButton},
+				func(buttonLabel string) {
+					switch buttonLabel {
+					case ba.saveAndQuitButton:
+						ba.saveSettings()
+						fallthrough
+					case ba.quitButton:
+						ba.Stop()
+					}
+				})
 			return nil
 		}
 		return event
@@ -300,6 +327,9 @@ func (ba *BuilderApplication) initServices() *BuilderApplication {
 			ba.textView.SetText(ba.settingsHelp)
 		})
 	}
+	ba.services.AddItem(ba.fetchLatest, "", 'f', func() {
+		ba.paperLoader.LoadLatest(ba.ShowProjectSelector)
+	})
 	ba.services.Box.
 		SetBorder(true).
 		SetTitle(ba.makeTitleString(ba.servicesName)).
@@ -350,7 +380,6 @@ func (ba *BuilderApplication) initialize() *BuilderApplication {
 	ba.log = tview.NewTextView()
 	log.SetOutput(ba.log)
 	ba.pages = tview.NewPages()
-	ba.modal = tview.NewModal()
 	ba.services = tview.NewList()
 	ba.form = tview.NewForm()
 	ba.flex = tview.NewFlex()
@@ -358,7 +387,6 @@ func (ba *BuilderApplication) initialize() *BuilderApplication {
 	ba.paperLoader = paper_loader.NewPaperLoader()
 	return ba.loadSettings().
 		loadJars().
-		initModal().
 		initServices().
 		initForm().
 		initTextView().
@@ -367,22 +395,9 @@ func (ba *BuilderApplication) initialize() *BuilderApplication {
 }
 
 func (ba *BuilderApplication) ShowProjectSelector(projects *[]string) {
-	selector := tview.NewModal()
-	selector.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
-			ba.hideModal(ba.selectorPage)
-			return nil
-		}
-		return event
+	ba.showModal("Select a PaperMC project:", *projects, func(s string) {
+		ba.paperLoader.LoadProject(s)
 	})
-	selector.
-		SetText("Select project to check:").
-		AddButtons(*projects).
-		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			ba.hideModal(ba.selectorPage)
-			ba.paperLoader.LoadProject(buttonLabel)
-		})
-	ba.pages.AddAndSwitchToPage(ba.selectorPage, selector, true)
 }
 
 func (ba *BuilderApplication) RunApplication() {
