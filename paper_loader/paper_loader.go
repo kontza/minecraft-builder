@@ -11,10 +11,10 @@ type Projects struct {
 	Projects []string
 }
 
-type ProjectsCallback func(*Projects)
+type ProjectsCallback func(*[]string)
 
 type PaperLoader interface {
-	LoadLatest()
+	LoadLatest(f ProjectsCallback)
 	LoadProject(project string)
 }
 
@@ -25,7 +25,7 @@ func (l paperLoader) LoadProject(project string) {
 	log.Println("Should process project", project)
 }
 
-func (l paperLoader) LoadLatest() {
+func (l paperLoader) LoadLatest(f ProjectsCallback) {
 	c := colly.NewCollector()
 	c.OnError(func(r *colly.Response, err error) {
 		log.Println("Failed to find the latest:", err)
@@ -39,6 +39,7 @@ func (l paperLoader) LoadLatest() {
 			log.Println("Failed to unmarshal projects:", err)
 		} else {
 			// Call BuilderApplication
+			f(&projects.Projects)
 		}
 	})
 	c.Visit("https://papermc.io/api/v2/projects")

@@ -42,7 +42,7 @@ const (
 
 type ApplicationBuilder interface {
 	RunApplication()
-	ShowProjectSelector(projects []string)
+	ShowProjectSelector(projects *[]string)
 }
 
 type BuilderApplication struct {
@@ -264,7 +264,7 @@ func (ba *BuilderApplication) initForm() *BuilderApplication {
 		AddDropDown("Server JAR", ba.jars, 0, nil).
 		AddInputField("Server Port", "", 0, nil, nil).
 		AddButton("Fetch latest PaperMC", func() {
-			paper_loader.LoadLatest(ba.ShowProjectSelector)
+			ba.paperLoader.LoadLatest(ba.ShowProjectSelector)
 		})
 	ba.form.Box.SetBorder(true).SetTitle(ba.makeTitleString(ba.settingsName))
 	ba.form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -366,7 +366,7 @@ func (ba *BuilderApplication) initialize() *BuilderApplication {
 		initPages()
 }
 
-func (ba *BuilderApplication) ShowProjectSelector(projects []string) {
+func (ba *BuilderApplication) ShowProjectSelector(projects *[]string) {
 	selector := tview.NewModal()
 	selector.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
@@ -377,7 +377,7 @@ func (ba *BuilderApplication) ShowProjectSelector(projects []string) {
 	})
 	selector.
 		SetText("Select project to check:").
-		AddButtons(projects).
+		AddButtons(*projects).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 			ba.hideModal(ba.selectorPage)
 			ba.paperLoader.LoadProject(buttonLabel)
